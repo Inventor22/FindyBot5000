@@ -20,67 +20,82 @@ class database:
 
         return results
 
-    def add_or_update_item(self, item_name, additional_quantity) -> None:
+    def add_or_update_item(self, item_name, additional_quantity) -> tuple[bool, int, int]:
         conn = sqlite3.connect("inventory.db")
         cursor = conn.cursor()
 
-        # Check if the item already exists
-        cursor.execute("SELECT * FROM item WHERE name = ?", (item_name,))
-        item = cursor.fetchone()
+        try:
+            # Check if the item already exists
+            cursor.execute("SELECT * FROM item WHERE name = ?", (item_name,))
+            item = cursor.fetchone()
 
-        if item:
-            # Item exists, update its quantity
-            new_quantity = item[2] + additional_quantity
-            cursor.execute("UPDATE item SET quantity = ?, date_updated = ? WHERE name = ?",
-                        (new_quantity, date.today(), item_name))
-        else:
-            # Item does not exist, find the next available row and column
-            # Query all rows and columns in the item table
-            cursor.execute("SELECT row, col FROM item")
-            occupied_positions = cursor.fetchall()
-
-            # Determine the minimum available row and column
-            occupied_positions_set = set(occupied_positions)
-            if len(occupied_positions_set) > 0:
-                max_row = max([pos[0] for pos in occupied_positions])
-                max_col = max([pos[1] for pos in occupied_positions])
+            if item:
+                # Item exists, update its quantity
+                new_quantity = item[2] + additional_quantity
+                cursor.execute("UPDATE item SET quantity = ?, date_updated = ? WHERE name = ?",
+                            (new_quantity, date.today(), item_name))
+                
+                return True, item[3], item[4]
             else:
-                max_row, max_col = 0, 0
+                # Item does not exist, find the next available row and column
+                # Query all rows and columns in the item table
+                cursor.execute("SELECT row, col FROM item")
+                occupied_positions = cursor.fetchall()
 
-            next_row, next_column = None, None
-            for row in range(1, min(max_row + 2, 8)):
-                for col in range(1, min(max_col + 2, 16)):
-                    if (row, col) not in occupied_positions_set:
-                        next_row, next_column = row, col
+                # Determine the minimum available row and column
+                occupied_positions_set = set(occupied_positions)
+                if len(occupied_positions_set) > 0:
+                    max_row = max([pos[0] for pos in occupied_positions])
+                    max_col = max([pos[1] for pos in occupied_positions])
+                else:
+                    max_row, max_col = 0, 0
+
+                next_row, next_column = None, None
+                for row in range(1, min(max_row + 2, 8)):
+                    for col in range(1, min(max_col + 2, 16)):
+                        if (row, col) not in occupied_positions_set:
+                            next_row, next_column = row, col
+                            break
+                    if next_row is not None:
                         break
-                if next_row is not None:
-                    break
 
-            if next_row == None or next_column == None:
-                raise Exception("There is no remaining space in the organizer!")
-            
-            print(f"Inserting item '{item_name}' at [{next_row}, {next_column}]")
+                if next_row == None or next_column == None:
+                    raise Exception("There is no remaining space in the organizer!")
+                
+                print(f"Inserting item '{item_name}' at [{next_row}, {next_column}]")
 
-            # Insert the new item with the given quantity at the next available row and column
-            cursor.execute("""
-                INSERT INTO item (name, quantity, row, col, date_created, date_updated)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """, (item_name, additional_quantity, next_row, next_column, date.today(), date.today()))
-            
-            cursor.execute("""
-                INSERT INTO item_fts (id, name)
-                VALUES (?, ?)
-                """, (cursor.lastrowid, item_name))
+                # Insert the new item with the given quantity at the next available row and column
+                cursor.execute("""
+                    INSERT INTO item (name, quantity, row, col, date_created, date_updated)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """, (item_name, additional_quantity, next_row, next_column, date.today(), date.today()))
+                
+                cursor.execute("""
+                    INSERT INTO item_fts (id, name)
+                    VALUES (?, ?)
+                    """, (cursor.lastrowid, item_name))
+                
+                return False, max_row, max_col
+        finally:
+            # Commit the changes and close the connection
+            conn.commit()
+            conn.close()
 
-        # Commit the changes and close the connection
-        conn.commit()
-        conn.close()
-
-    def delete_items(items) -> None:
+    def delete_items(self, items) -> None:
         conn = sqlite3.connect("inventory.db")
         cursor = conn.cursor()
+
+        agg_results = []
 
         for item in items:
+            cursor.execute("""
+                SELECT item.*, item_fts.rank FROM item JOIN item_fts 
+                ON item.id = item_fts.id WHERE item_fts.name 
+                MATCH ? ORDER BY item_fts.rank""", (item,))
+            
+            results = cursor.fetchall()
+            agg_results.append(*results)
+
             cursor.execute(f"DELETE FROM item WHERE name=?", (item,))
 
             if cursor.rowcount > 0:
@@ -97,6 +112,47 @@ class database:
 
         conn.commit()
         conn.close()
+
+        return agg_results
+    
+    def delete_items2(self, items) -> None:
+        # Connect to the database
+        conn = sqlite3.connect("my_database.db")
+        cursor = conn.cursor()
+
+        agg_deleted_items = []
+
+        for item in items:
+
+            cursor.execute("""
+                SELECT item.*, item_fts.rank FROM item JOIN item_fts 
+                ON item.id = item_fts.id WHERE item_fts.name MATCH ? 
+                ORDER BY item_fts.rank""", (item,))
+
+            #cursor.execute("SELECT * FROM item_fts WHERE name MATCH ?", (item,))
+
+            # Fetch the matching items
+            matching_items = cursor.fetchall()
+
+            if len(matching_items) > 1:
+                print(f"More than one item found for {item}. Skipping to avoid unintentional deletions.")
+                print(matching_items)
+
+            print(f"Deleting:")
+            print(matching_items)
+
+            agg_deleted_items.append(*matching_items)
+
+            # Delete the matching items from the item table and the item_fts table using the ids
+            for item_id in matching_items:
+                cursor.execute("DELETE FROM item WHERE id=?", (item_id[0],))
+                cursor.execute("DELETE FROM item_fts WHERE id=?", (item_id[0],))
+
+        # Commit the changes and close the connection
+        conn.commit()
+        conn.close()
+
+        return agg_deleted_items
 
     def print_tables(self) -> None:
         conn = sqlite3.connect("inventory.db")

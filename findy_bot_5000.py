@@ -36,16 +36,20 @@ class FindyBot5000:
         while not quit:
             # Step 0: Detect a human
             # todo
-
+            
             try:
                 # Step 1: Listen for the keyword
                 #keyword_speech = LiveSpeech(lm=False, keyphrase='jarvis', kws_threshold=1e-20)
+                print('Listening for Keyword...')
                 keyword_speech = LiveSpeech()
                 for phrase in keyword_speech:
                     words = str(phrase)
                     if any(keyword in words for keyword in self.keywords):# 'jarvis' in words or 'jervis' in words:
+                        print(f'Heard a keyword! {self.keywords}')
                         break
-                    elif 'exit' in words:
+                    elif 'print' in words:
+                        self.db.print_tables()
+                    elif 'exit' in words or 'quit' in words:
                         quit = True
                         raise Exception("Quitting")
 
@@ -59,6 +63,9 @@ class FindyBot5000:
                 print("Running speech to text with Whisper")
                 whisper_text = r.recognize_whisper_api(audio, model="whisper-1", api_key=self.openai_key)
                 print(f"Whisper thinks you said: '{whisper_text}'")
+
+                if whisper_text == '':
+                    continue
                 
                 # Step 4: Identify items from text using one of OpenAI's GPT LLM's
                 human_response, json_response = self.get_responses(whisper_text)
@@ -70,42 +77,61 @@ class FindyBot5000:
                 voice.generate_and_play_audio(human_response, playInBackground=False)
 
                 # Step 6: Use the json_response to update the database
-                self.update_database(json_response)
+                items_to_display = self.update_database(json_response)
+
+                # Step 7: Display the items
+                self.display_items(items_to_display)
 
             except sr.UnknownValueError:
-                print("Sphinx could not understand audio")  
+                print("Sphinx could not understand audio")
             except sr.RequestError as e:
-                print("Sphinx error; {0}".format(e))
+                print(f"Sphinx error; {e}")
             except Exception as e:
                 print(f"Ex: {e}")
 
-    def update_database(self, json_response: str) -> None:
+    def update_database(self, json_response: str) -> list:
         try:
             parsed_json = json.loads(json_response)
             cmd = parsed_json['cmd']
             items = parsed_json['items']
 
+            items_to_display = []
+
             if cmd == 'find':
                 for item in items:
                     found_items = self.db.search_items(item)
+                    for found_item in found_items:
+                        items_to_display.append(found_item)
+                                    
             elif cmd == 'add':
                 for item in items:
-                    self.db.add_or_update_item(item, 1)
+                    added_or_updated_item = self.db.add_or_update_item(item, 1)
+                    items_to_display.append(added_or_updated_item)
+
             elif cmd == 'remove':
-                for item in items:
-                    self.db.delete_items(item)
+                items_deleted = self.db.delete_items2(items)
+                for item in items_deleted:
+                    items_to_display.append(item)
             else:
                 print(f"Unexpected command: '{cmd}'")
+            
+            return items_to_display
+
         except json.JSONDecodeError:
             print("The string provided is not a valid JSON.")
 
+    def display_items(self, items: list) -> None:
+        print("Processed Items:")
+        for item in items:
+            print(item)
 
     def get_responses(self, question: str) -> str:      
 
         language_prompt = \
             'You are a helpful assistant. A user will ask you to find, add, or remove items. Assume all items can be found.' + \
-            'Reply with a friendly message. The message must mention the items. Do not mention where the items are added or removed. It must be a single sentence.' + \
-            f'Question: {question}'
+            'Reply with a friendly message. The message must mention the items. If there are no items, reply with an empty sentence. ' + \
+            'Do not mention where the items are added or removed. It must be a single sentence.' + \
+           f'Question: {question}'
 
         openai_response = openai.Completion.create(
             engine=self.engine,
@@ -123,7 +149,7 @@ class FindyBot5000:
             'If finding items, format as: { "cmd": "find", "items": ["red LEDs", "blue LEDs"] }. ' + \
             'If adding items, format as: { "cmd": "add", "items": ["green LEDs"] }. ' + \
             'If removing items, format as: { "cmd": "remove", "items": ["yellow LEDs", "twist ties", "9V battery"] }.' + \
-        f'Question: {question}'
+           f'Question: {question}'
         
         openai_response = openai.Completion.create(
             engine=self.engine,
