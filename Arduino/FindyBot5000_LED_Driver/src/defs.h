@@ -1,5 +1,5 @@
-#ifndef DEFS_H
-#define DEFS_H
+#ifndef __DEFS_H__
+#define __DEFS_H__
 
 #include <Arduino.h>
 

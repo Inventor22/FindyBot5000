@@ -6,6 +6,7 @@
 
 // Libraries
 #include "defs.h"
+#include "html_colors_array.h"
 #include <Arduino.h>
 #include <Adafruit_GFX.h>
 #include <FastLED_NeoMatrix.h>
@@ -18,7 +19,7 @@
 #define POWER_SUPPLY_RELAY_PIN PIN_A8
 
 #define LED_ROWS (8+6)
-#define LED_COLS 60
+#define LED_COLS (60)
 #define LED_COLS_HALF (LED_COLS / 2)
 #define PIXEL_COUNT (LED_COLS * LED_ROWS)
 
@@ -37,41 +38,28 @@ FastLED_NeoMatrix *matrix = new FastLED_NeoMatrix(
     NEO_MATRIX_TOP  + NEO_MATRIX_LEFT +
     NEO_MATRIX_ROWS + NEO_MATRIX_ZIGZAG);
 
-uint16_t red = matrix->Color(255, 0, 0);
-uint16_t green = matrix->Color(0, 255, 0);
-uint16_t blue = matrix->Color(0, 0, 255);
-uint16_t magenta = matrix->Color(255, 0, 255);
-uint16_t orange = matrix->Color(255, 165, 0);
-uint16_t cyan = matrix->Color(0, 255, 255);
-uint16_t purple = matrix->Color(128,0,128);
-uint16_t white = matrix->Color(255, 255, 255);
+// uint16_t red = matrix->Color(255, 0, 0);
+// uint16_t green = matrix->Color(0, 255, 0);
+// uint16_t blue = matrix->Color(0, 0, 255);
+// uint16_t magenta = matrix->Color(255, 0, 255);
+// uint16_t orange = matrix->Color(255, 165, 0);
+// uint16_t cyan = matrix->Color(0, 255, 255);
+// uint16_t purple = matrix->Color(128,0,128);
+// uint16_t white = matrix->Color(255, 255, 255);
 
-const uint16_t colors[] = {
-  red,
-  green,
-  blue,
-  magenta,
-  orange,
-  cyan
-};
+// const CRGB::HTMLColorCode colors[] = {
+//     CRGB::AliceBlue,
+//     CRGB::Amethyst,
+//     CRGB::AntiqueWhite
+// };
 
-struct ColorName {
-  const char* name;
-  uint16_t color;
-};
+// CRGB::HTMLColorCode
 
-const ColorName colorNames[] = {
-  { "red", red },
-  { "green", green },
-  { "blue", blue },
-  { "magenta", magenta },
-  { "orange", orange },
-  { "cyan", cyan },
-  { "white", white },
-  { "purple", purple }
-};
+int r(int minRand, int maxRand);
 
-const uint8_t colorCount = sizeof(colors) / sizeof(uint16_t);
+int colorSetIndex;
+CRGB::HTMLColorCode *colors;
+uint8_t colorCount;
 
 int scrollPosition = matrix->width();
 int scrollCount = 0;
@@ -79,21 +67,16 @@ int scrollCount = 0;
 String text = "H I ";
 int textLength = 0;
 int sRow = 0, sCol = 0;
-uint16_t sColor = cyan;
 bool sSet = false;
 
-// Controlled via Google Assistant
 bool enableDisplay = false;
 bool enableTextScrolling = false;
 bool enableDebugging = true;
 
-// Controlled locally
-bool enableLightAllBoxes = false;
-bool enableRainbowLeds = false;
-
 // Method definitions
-uint16_t getGradientColor(uint16_t col0, uint16_t col1, float value);
-uint16_t gradientBetween(uint16_t col0, uint16_t col1, float value);
+void iterateColorThemes();
+uint16_t getGradientColor(CRGB::HTMLColorCode col0, CRGB::HTMLColorCode col1, float value);
+uint16_t gradientBetween(CRGB::HTMLColorCode col0, CRGB::HTMLColorCode col1, float value);
 uint16_t getGreenRedValue(float value);
 void gradientTest();
 void welcome(const char* data);
@@ -108,18 +91,18 @@ float normalize(float value, float start, float end);
 void showAllBoxesResponseHandler();
 void dispayItemNotFound();
 void lightBox(int row, int col, uint16_t color);
-void scrollDisplay();
 void lightBoxes(int msDelay);
 uint32_t Wheel(uint8_t WheelPos);
-int r(int minRand, int maxRand);
 
 // Program
 void setup()
 {
-  delay(1000);
+  //delay(1000);
 
   Serial.begin(115200);
-  Serial.println(F("FindyBot5000"));
+  while (!Serial);
+  
+  Serial.println("FindyBot5000");
 
   // Start FindyBot5000 with the display off
   pinMode(POWER_SUPPLY_RELAY_PIN, OUTPUT);
@@ -132,27 +115,46 @@ void setup()
   matrix->begin();
   matrix->setTextWrap(false);
   matrix->setBrightness(30);
-  matrix->setTextColor(cyan);
+  matrix->setTextColor(matrix->Color24to16(CRGB::BlueViolet));
 
   setDisplay(ON);
 
-  //matrix->fillScreen(green);
+  //matrix->fillScreen(CRGB::Green);
   matrix->show();
 
-  gradientTest();
-  //lightBoxes();
+  colorSetIndex = 0;
+  colors = const_cast<CRGB::HTMLColorCode*>(colorSets[colorSetIndex]);
+  colorCount = colorSetSizes[colorSetIndex];
+
+  //gradientTest();
+  //lightBoxes(0);
 }
 
 void loop()
 {
   if (!enableDisplay) return;
-  if (enableLightAllBoxes) lightBoxes(50);
-  else if (enableTextScrolling) scrollDisplay();
+
+  iterateColorThemes();
+}
+
+void iterateColorThemes() {
+  for (int i = 0; i < numColorSets; i++) {
+      Serial.println(i);
+      colorSetIndex = i; // r(0, numColorSets-1);
+      colors = const_cast<CRGB::HTMLColorCode*>(colorSets[colorSetIndex]);
+      colorCount = colorSetSizes[colorSetIndex];
+      lightBoxes(0);
+      delay(2000);
+      matrix->clear();
+  }
 }
 
 // weight = 0 -> col0, weight = 0.5 -> 50/50 col0/col1, weight = 1 -> col1
-uint16_t getGradientColor(uint16_t col0, uint16_t col1, float value)
+uint16_t getGradientColor(CRGB::HTMLColorCode color0, CRGB::HTMLColorCode color1, float value)
 {
+  uint16_t col0 = matrix->Color24to16(color0);
+  uint16_t col1 = matrix->Color24to16(color1);
+
   uint8_t red = 0, green = 0, blue = 0;
   uint8_t r = (col0 & 0xF800) >> 8;
   uint8_t g = (col0 & 0x07E0) >> 3;
@@ -187,8 +189,11 @@ uint16_t getGradientColor(uint16_t col0, uint16_t col1, float value)
   return matrix->Color(red, green, blue);
 }
 
-uint16_t gradientBetween(uint16_t col0, uint16_t col1, float value)
+uint16_t gradientBetween(CRGB::HTMLColorCode color0, CRGB::HTMLColorCode color1, float value)
 {
+  uint16_t col0 = matrix->Color24to16(color0);
+  uint16_t col1 = matrix->Color24to16(color1);
+
   uint8_t r0 = (col0 & 0xF800) >> 8;
   uint8_t g0 = (col0 & 0x07E0) >> 3;
   uint8_t b0 = (col0 & 0x1F) << 3;
@@ -245,19 +250,18 @@ void gradientTest()
 
   for (int i = 0; i < LED_COLS; i++)
   {
-    matrix->drawPixel(i, row+4, getGradientColor(green, blue, ((float)i)/LED_COLS));
-    matrix->drawPixel(i, row+5, gradientBetween(green, blue, ((float)i)/LED_COLS));
+    matrix->drawPixel(i, row+4, getGradientColor(CRGB::Green, CRGB::Blue, ((float)i)/LED_COLS));
+    matrix->drawPixel(i, row+5, gradientBetween(CRGB::Green, CRGB::Blue, ((float)i)/LED_COLS));
+    matrix->drawPixel(i, row+6, getGradientColor(CRGB::Blue, CRGB::Red, ((float)i)/LED_COLS));
+    matrix->drawPixel(i, row+7, gradientBetween(CRGB::Red, CRGB::Blue, ((float)i)/LED_COLS));
 
-    matrix->drawPixel(i, row+6, getGradientColor(blue, red, ((float)i)/LED_COLS));
-    matrix->drawPixel(i, row+7, gradientBetween(red, blue, ((float)i)/LED_COLS));
+    matrix->drawPixel(i, row+8, getGradientColor(CRGB::Red, CRGB::Green, ((float)i)/LED_COLS));
+    matrix->drawPixel(i, row+9, gradientBetween(CRGB::Red, CRGB::Green, ((float)i)/LED_COLS));
 
-    matrix->drawPixel(i, row+8, getGradientColor(red, green, ((float)i)/LED_COLS));
-    matrix->drawPixel(i, row+9, gradientBetween(red, green, ((float)i)/LED_COLS));
-
-    matrix->drawPixel(i, row+10, getGradientColor(cyan, orange, ((float)i)/LED_COLS));
-    matrix->drawPixel(i, row+11, gradientBetween(cyan, orange, ((float)i)/LED_COLS));
-    matrix->drawPixel(i, row+12, gradientBetween(purple, orange, ((float)i)/LED_COLS));
-    matrix->drawPixel(i, row+13, gradientBetween(white, blue, ((float)i)/LED_COLS));
+    matrix->drawPixel(i, row+10, getGradientColor(CRGB::Cyan, CRGB::Orange, ((float)i)/LED_COLS));
+    matrix->drawPixel(i, row+11, gradientBetween(CRGB::Cyan, CRGB::Orange, ((float)i)/LED_COLS));
+    matrix->drawPixel(i, row+12, gradientBetween(CRGB::Purple, CRGB::Orange, ((float)i)/LED_COLS));
+    matrix->drawPixel(i, row+13, gradientBetween(CRGB::White, CRGB::Blue, ((float)i)/LED_COLS));
   }
 
   matrix->show();
@@ -375,40 +379,13 @@ void lightBox(int row, int col, uint16_t color)
 
   //matrix->fillScreen(0);
 
-  for (int i = 0; i < ledCount; i++) {
-    matrix->drawPixel(ledOffset + i, row, color);
-  }
+  matrix->drawFastHLine(ledOffset, row, ledCount, color);
+
+  // for (int i = 0; i < ledCount; i++) {
+  //   matrix->drawPixel(ledOffset + i, row, color);
+  // }
 
   matrix->show();
-}
-
-void scrollDisplay()
-{
-  static const int smileOffset = 16+8;
-
-  matrix->fillScreen(0);
-  matrix->setCursor(scrollPosition, 0);
-  matrix->print(text);
-
-  for (int i = 0; i < textLength/2 + (smileOffset/LED_MATRIX_CHAR_WIDTH)-2; i++) {
-    matrix->drawBitmap(scrollPosition + i*LED_MATRIX_CHAR_WIDTH*2, 8, fire, 8, 6, colors[0 /*(scrollCount+i)%colorCount*/]);
-  }
-
-  matrix->drawBitmap(scrollPosition + textLength*LED_MATRIX_CHAR_WIDTH + 8, 0, smile, 16, 8, colors[2]);
-
-  // Change the text color on the next scroll through
-  if (--scrollPosition < -textLength*LED_MATRIX_CHAR_WIDTH - smileOffset) {
-    scrollPosition = matrix->width();
-    if(++scrollCount >= colorCount) scrollCount = 0;
-    matrix->setTextColor(colors[scrollCount]);
-  }
-
-  if (sSet) {
-    lightBox(sRow, sCol, sColor);
-  }
-
-  matrix->show();
-  //delay(10);
 }
 
 void setDisplay(bool state)
@@ -434,15 +411,21 @@ void lightBoxes(int msDelay)
 {
   for (int row = 0; row < 8; row++) {
     for (int col = 0; col < 16; col++) {
-      lightBox(row, col, colors[r(0, colorCount-1)]);
-      delay(msDelay);
+      lightBox(row, col, matrix->Color24to16(colors[r(0, colorCount-1)]));
+      if (msDelay > 0)
+      {
+        delay(msDelay);
+      }
     }
   }
 
   for (int row = 8; row < 14; row++) {
     for (int col = 0; col < 8; col++) {
-      lightBox(row, col, colors[r(0, colorCount-1)]);
-      delay(msDelay);
+      lightBox(row, col, matrix->Color24to16(colors[r(0, colorCount-1)]));
+      if (msDelay > 0)
+      {
+        delay(msDelay);
+      }
     }
   }
 
