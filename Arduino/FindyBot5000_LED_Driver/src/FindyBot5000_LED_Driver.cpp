@@ -75,6 +75,7 @@ bool enableDebugging = true;
 
 // Method definitions
 void iterateColorThemes();
+uint16_t htmlColorCodeToUint16(uint32_t html_color_code);
 uint16_t getGradientColor(CRGB::HTMLColorCode col0, CRGB::HTMLColorCode col1, float value);
 uint16_t gradientBetween(CRGB::HTMLColorCode col0, CRGB::HTMLColorCode col1, float value);
 uint16_t getGreenRedValue(float value);
@@ -147,6 +148,18 @@ void iterateColorThemes() {
       delay(2000);
       matrix->clear();
   }
+}
+
+uint16_t htmlColorCodeToUint16(uint32_t html_color_code) {
+    uint8_t r = (html_color_code >> 16) & 0xFF;
+    uint8_t g = (html_color_code >> 8) & 0xFF;
+    uint8_t b = html_color_code & 0xFF;
+
+    uint16_t r_565 = r >> 3; // Shift 3 bits to the right to reduce 8 bits to 5 bits
+    uint16_t g_565 = g >> 2; // Shift 2 bits to the right to reduce 8 bits to 6 bits
+    uint16_t b_565 = b >> 3; // Shift 3 bits to the right to reduce 8 bits to 5 bits
+
+    return (r_565 << 11) | (g_565 << 5) | b_565;
 }
 
 // weight = 0 -> col0, weight = 0.5 -> 50/50 col0/col1, weight = 1 -> col1
