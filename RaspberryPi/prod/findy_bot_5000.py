@@ -4,10 +4,15 @@ import json
 import speech_recognition as sr
 from pocketsphinx import LiveSpeech
 from elevenlabslib import *
+import platform
+
 from database import database
+from serial_interface import SerialInterface, print_received_data
+from item import Item
+from color import Color
 
 class FindyBot5000:
-    def __init__(self) -> None:
+    def __init__(self, port: str) -> None:
         # Keyword identification and sentence detection
         # Sphinx has some trouble getting 'jarvis' every time...
         self.keywords = ['jarvis', 'jervis']
@@ -19,17 +24,32 @@ class FindyBot5000:
 
         # Voice synthesis - ElevenLabs
         self.elevenlabs_key = os.environ.get('ELEVENLABS_API_KEY')
-        self.voice = "Rachel"
+        self.voice_name = "Rachel"
+        self.recognizer = sr.Recognizer()
+        self.speech = sr.Microphone(device_index=0)
+        self.user = ElevenLabsUser(self.elevenlabs_key)
+        self.voice = self.user.get_voices_by_name(self.voice_name)[0]  # This is a list because multiple voices can have the same name
 
         # SQL database
         self.db = database()
 
+        # Serial port interface to communicate with Arduino
+        if port is None:
+            os_name = platform.system()
+
+            if self.serial is None:
+                if os_name == 'Linux':
+                    self.serial = SerialInterface('dev/ttyACM0', 115200, print_received_data)
+                elif os_name == 'Windows':
+                    self.serial = SerialInterface('COM7', 115200, print_received_data)
+            
+            self.serial.open()
+        else:
+            self.serial = SerialInterface(port, 115200, print_received_data)
+            self.serial.open()
+
 
     def run(self) -> None:
-        r = sr.Recognizer()
-        speech = sr.Microphone(device_index=0)
-        user = ElevenLabsUser(self.elevenlabs_key)
-        voice = user.get_voices_by_name(self.voice)[0]  # This is a list because multiple voices can have the same name
 
         quit = False
 
@@ -49,19 +69,20 @@ class FindyBot5000:
                         break
                     elif 'print' in words:
                         self.db.print_tables()
-                    elif 'exit' in words or 'quit' in words:
+                    elif 'exit' in words or 'quit' in words or 'stop' in words:
                         quit = True
+                        self.serial.close()
                         raise Exception("Quitting")
 
                 # Step 2: Listen for a sentence
-                with speech as source:
+                with self.speech as source:
                     print("Listening for a sentence...")
-                    audio = r.adjust_for_ambient_noise(source)
-                    audio = r.listen(source)
+                    audio = self.recognizer.adjust_for_ambient_noise(source)
+                    audio = self.recognizer.listen(source)
                 
                 # Step 3: Speech to Text
                 print("Running speech to text with Whisper")
-                whisper_text = r.recognize_whisper_api(audio, model="whisper-1", api_key=self.openai_key)
+                whisper_text = self.recognizer.recognize_whisper_api(audio, model="whisper-1", api_key=self.openai_key)
                 print(f"Whisper thinks you said: '{whisper_text}'")
 
                 if whisper_text == '':
@@ -74,13 +95,16 @@ class FindyBot5000:
                 print(f"OpenAI json response: '{json_response}'")
 
                 # Step 5: Use EleventLabs to synthesize a voice response for the item being looked for
-                voice.generate_and_play_audio(human_response, playInBackground=False)
+                print("Generating and playing audio")
+                self.voice.generate_and_play_audio(human_response, playInBackground=False)
 
                 # Step 6: Use the json_response to update the database
-                items_to_display = self.update_database(json_response)
+                print("Updating database")
+                cmd, items_to_display = self.update_database(json_response)
 
                 # Step 7: Display the items
-                self.display_items(items_to_display)
+                print("Displaying items")
+                self.display_items(cmd, items_to_display)
 
             except sr.UnknownValueError:
                 print("Sphinx could not understand audio")
@@ -115,15 +139,27 @@ class FindyBot5000:
             else:
                 print(f"Unexpected command: '{cmd}'")
             
-            return items_to_display
+            return cmd, items_to_display
 
         except json.JSONDecodeError:
             print("The string provided is not a valid JSON.")
 
-    def display_items(self, items: list) -> None:
+    def display_items(self, cmd: str, items: list) -> None:
         print("Processed Items:")
         for item in items:
             print(item)
+            
+            if cmd == 'find':
+                color = Color.LawnGreen
+            elif cmd == 'add':
+                color = Color.Cyan
+            elif cmd == 'remove':
+                color = Color.Red
+            
+            if not self.serial.relay_on:
+                self.serial.set_relay(True)
+
+            self.serial.set_box_color(item[Item.Row], item[Item.Col], color)
 
     def get_responses(self, question: str) -> str:      
 
