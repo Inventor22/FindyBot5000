@@ -29,6 +29,13 @@
 #define ON true
 #define OFF false
 
+const byte START_BYTE = 0xAA;
+const byte STOP_BYTE = 0x55;
+const byte CMD_PIXEL_COLOR = 0x01;
+const byte CMD_RELAY = 0x02;
+const byte CMD_CLEAR_DISPLAY = 0x03;
+const byte CMD_LIGHT_BOXES = 0x04;
+
 CRGB leds[PIXEL_COUNT];
 
 FastLED_NeoMatrix *matrix = new FastLED_NeoMatrix(
@@ -38,40 +45,13 @@ FastLED_NeoMatrix *matrix = new FastLED_NeoMatrix(
     NEO_MATRIX_TOP  + NEO_MATRIX_LEFT +
     NEO_MATRIX_ROWS + NEO_MATRIX_ZIGZAG);
 
-// uint16_t red = matrix->Color(255, 0, 0);
-// uint16_t green = matrix->Color(0, 255, 0);
-// uint16_t blue = matrix->Color(0, 0, 255);
-// uint16_t magenta = matrix->Color(255, 0, 255);
-// uint16_t orange = matrix->Color(255, 165, 0);
-// uint16_t cyan = matrix->Color(0, 255, 255);
-// uint16_t purple = matrix->Color(128,0,128);
-// uint16_t white = matrix->Color(255, 255, 255);
-
-// const CRGB::HTMLColorCode colors[] = {
-//     CRGB::AliceBlue,
-//     CRGB::Amethyst,
-//     CRGB::AntiqueWhite
-// };
-
-// CRGB::HTMLColorCode
-
 int r(int minRand, int maxRand);
 
 int colorSetIndex;
 CRGB::HTMLColorCode *colors;
 uint8_t colorCount;
 
-int scrollPosition = matrix->width();
-int scrollCount = 0;
-
-String text = "H I ";
-int textLength = 0;
-int sRow = 0, sCol = 0;
-bool sSet = false;
-
-bool enableDisplay = false;
-bool enableTextScrolling = false;
-bool enableDebugging = true;
+bool enableDisplay = true;
 
 // Method definitions
 void iterateColorThemes();
@@ -110,15 +90,13 @@ void setup()
   digitalWrite(POWER_SUPPLY_RELAY_PIN, OFF);
   delay(1000);
 
-  textLength = text.length();
-
   FastLED.addLeds<NEOPIXEL, PIXEL_PIN>(leds, PIXEL_COUNT); 
   matrix->begin();
   matrix->setTextWrap(false);
   matrix->setBrightness(30);
   matrix->setTextColor(matrix->Color24to16(CRGB::BlueViolet));
 
-  setDisplay(ON);
+  //setDisplay(ON);
 
   //matrix->fillScreen(CRGB::Green);
   matrix->show();
@@ -130,13 +108,147 @@ void setup()
   //gradientTest();
   //lightBoxes(0);
 }
+const int BUFFER_SIZE = 64; // Adjust the buffer size according to your needs
+
+char inputBuffer[BUFFER_SIZE] = {0};
+int bufferPos = 0;
 
 void loop()
 {
-  if (!enableDisplay) return;
+  while (Serial.available())
+  {
+    char incomingChar = Serial.read();
+    Serial.print("Incoming char: ");
+    Serial.println(incomingChar);
 
-  iterateColorThemes();
+    if (incomingChar != '\n') // Not a newline character
+    {
+      if (bufferPos < BUFFER_SIZE - 1) // Leave space for null terminator
+      {
+        inputBuffer[bufferPos++] = incomingChar;
+      }
+    }
+    else
+    {
+      // Add newline so print function can terminate at the end of the string
+      Serial.print("Received command: ");
+      for (int i = 0; i < bufferPos; i++)
+      {
+        Serial.print(inputBuffer[i]);
+      }
+      Serial.print("|");
+      Serial.println();
+
+      // Process the inputBuffer here
+      if (bufferPos > 0 && inputBuffer[0] == START_BYTE)
+      {
+        byte cmd = inputBuffer[1];
+        
+        if (cmd == CMD_PIXEL_COLOR && bufferPos >= 8)
+        {
+          byte row = inputBuffer[2];
+          byte col = inputBuffer[3];
+          uint16_t color = matrix->Color(inputBuffer[4], inputBuffer[5], inputBuffer[6]);
+          byte stop = inputBuffer[7];
+
+          if (stop == STOP_BYTE)
+          {
+            lightBox(row, col, color);
+
+            Serial.print("Lighting box [");
+            Serial.print(row);
+            Serial.print(", ");
+            Serial.print(col);
+            Serial.print("] with color (");
+            Serial.print(inputBuffer[4]);
+            Serial.print(',');
+            Serial.print(inputBuffer[5]);
+            Serial.print(',');
+            Serial.print(inputBuffer[6]);
+            Serial.println(")");
+          }
+        } 
+        else if (cmd == CMD_RELAY && bufferPos >= 4)
+        {
+          byte relay_state = inputBuffer[2];
+          byte stop = inputBuffer[3];
+
+          if (stop == STOP_BYTE) 
+          {
+            setDisplay(relay_state ? ON : OFF);
+            Serial.print("Turning Display ");
+            Serial.println(relay_state ? "ON" : "OFF");
+          }
+        }
+        else if (cmd == CMD_CLEAR_DISPLAY && bufferPos >= 3)
+        {
+          byte stop = inputBuffer[2];
+          if (stop == STOP_BYTE) 
+          {
+            matrix->clear();
+            matrix->show();
+          }
+        }
+        else if (cmd == CMD_LIGHT_BOXES)
+        {
+          iterateColorThemes();
+        }
+      }
+      // Clear inputBuffer and reset bufferPos for the next line
+      memset(inputBuffer, 0, BUFFER_SIZE);
+      bufferPos = 0;
+    }
+  }
 }
+
+// void loop()
+// {
+  
+  // if (Serial.available())
+  // {
+  //   byte start = Serial.read();
+  //   if (start == START_BYTE)
+  //   {
+  //     byte cmd = Serial.read();
+
+  //     if (cmd == CMD_PIXEL_COLOR)
+  //     {
+  //       byte row = Serial.read();
+  //       byte col = Serial.read();
+  //       uint32_t html_color_code = Serial.read() << 16 | Serial.read() << 8 | Serial.read();
+  //       byte stop = Serial.read();
+
+  //       if (stop == STOP_BYTE)
+  //       {
+  //         CRGB color = CRGB::HTMLColorCode(html_color_code);
+  //         lightBox(row, col, color);
+  //       }
+  //     } 
+  //     else if (cmd == CMD_RELAY)
+  //     {
+  //       byte relay_state = Serial.read();
+  //       byte stop = Serial.read();
+
+  //       if (stop == STOP_BYTE) 
+  //       {
+  //         setDisplay(relay_state ? ON : OFF);
+  //       }
+  //     }
+  //     else if (cmd == CMD_CLEAR_DISPLAY)
+  //     {
+  //       byte stop = Serial.read();
+  //       if (stop == STOP_BYTE) 
+  //       {
+  //         matrix->clear();
+  //       }
+  //     }
+  //     else if (cmd == CMD_LIGHT_BOXES)
+  //     {
+  //       iterateColorThemes();
+  //     }
+  //   }
+  // }  
+// }
 
 void iterateColorThemes() {
   for (int i = 0; i < numColorSets; i++) {
@@ -282,32 +394,6 @@ void gradientTest()
   delay(1000);
 }
 
-void welcome(const char* data)
-{
-  if (data == NULL) return;
-  //
-  // char buff[strlen(data) * 2 + 1]
-  // for(int i = 0; i < strlen(data); i++)
-  // {
-  //   char c = data[i] <= 'Z' ? data[i] : data[i] - ('a'-'A');
-  //   buff[i] = c;
-  //   buff[i+1] = ' ';
-  // }
-
-  String s(data);
-  s.toUpperCase();
-  text = "W E L C O M E  ";
-
-  for(uint8_t i = 0; i < s.length(); i++) {
-    text += ' ';
-    text += s[i];
-  }
-
-  textLength = text.length();
-  enableTextScrolling = true;
-  setDisplay(ON);
-}
-
 // Turn the LED matrix power supply relay on or off
 void setDisplay(const char *data)
 {
@@ -331,26 +417,6 @@ void setBrightness(const char *data)
   if (0 < brightness && brightness <= 100) {
     matrix->setBrightness(map(brightness, 0, 100, 0, 255));
     matrix->show();
-  }
-}
-
-void setDebugging(const char *data)
-{
-  setStateFromText(enableDebugging, data);
-}
-
-void setScrollText(const char *data)
-{
-  setStateFromText(enableTextScrolling, data);
-}
-
-void setStateFromText(bool& variable, const char *onOffText)
-{
-  if (strcmp(onOffText, "on") == 0) {
-    variable = true;
-  }
-  else if (strcmp(onOffText, "off") == 0) {
-    variable = false;
   }
 }
 
@@ -392,18 +458,18 @@ void lightBox(int row, int col, uint16_t color)
 
   //matrix->fillScreen(0);
 
-  matrix->drawFastHLine(ledOffset, row, ledCount, color);
+  //matrix->drawFastHLine(ledOffset, row, ledCount, color);
 
-  // for (int i = 0; i < ledCount; i++) {
-  //   matrix->drawPixel(ledOffset + i, row, color);
-  // }
+  for (int i = 0; i < ledCount; i++) {
+    matrix->drawPixel(ledOffset + i, row, color);
+  }
 
   matrix->show();
 }
 
 void setDisplay(bool state)
 {
-  if (enableDisplay == state) return;
+  //if (enableDisplay == state) return;
 
   if (state) {
     digitalWrite(POWER_SUPPLY_RELAY_PIN, ON);
