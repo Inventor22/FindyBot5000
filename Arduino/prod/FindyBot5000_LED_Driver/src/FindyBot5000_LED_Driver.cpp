@@ -118,8 +118,6 @@ void loop()
   while (Serial.available())
   {
     char incomingChar = Serial.read();
-    Serial.print("Incoming char: ");
-    Serial.println(incomingChar);
 
     if (incomingChar != '\n') // Not a newline character
     {
@@ -132,12 +130,13 @@ void loop()
     {
       // Add newline so print function can terminate at the end of the string
       Serial.print("Received command: ");
-      for (int i = 0; i < bufferPos; i++)
+      // Cannot use println, because received bytes may include 0x00,
+      // which would terminate the string early
+      for (int i = 0; i < bufferPos-1; i++)
       {
         Serial.print(inputBuffer[i]);
       }
-      Serial.print("|");
-      Serial.println();
+      Serial.println(inputBuffer[bufferPos-1]);
 
       // Process the inputBuffer here
       if (bufferPos > 0 && inputBuffer[0] == START_BYTE)

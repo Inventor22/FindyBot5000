@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "Arduino/dev/FB5_NeoMatrix_test"
+		},
+		{
+			"path": "Arduino/dev/FindyBot5000_FastLED_lib_test"
+		},
+		{
+			"path": "Arduino/prod/FindyBot5000_LED_Driver"
+		},
+		{
+			"path": "."
+		}
+	]
+}
