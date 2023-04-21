@@ -132,11 +132,11 @@ void loop()
       Serial.print("Received command: ");
       // Cannot use println, because received bytes may include 0x00,
       // which would terminate the string early
-      for (int i = 0; i < bufferPos-1; i++)
+      for (int i = 0; i < bufferPos; i++)
       {
         Serial.print(inputBuffer[i]);
       }
-      Serial.println(inputBuffer[bufferPos-1]);
+      Serial.println();
 
       // Process the inputBuffer here
       if (bufferPos > 0 && inputBuffer[0] == START_BYTE)

@@ -12,13 +12,17 @@ class SerialInterface:
         self.callback = callback
         self.ser = None
         self.relay_on = False
+        self.stop_event = None
 
     def __del__(self):
+        if self.stop_event is not None:
+            self.stop_event.set()
+
         if self.ser is not None and self.ser.is_open:
             self.ser.close()
 
-    def read_loop(self):
-        while True:
+    def read_loop(self, stop_event: threading.Event):
+        while not stop_event.is_set():
             try:
                 data = self.ser.readline()#.decode('ascii')
             finally:
@@ -31,12 +35,15 @@ class SerialInterface:
         else:
             self.ser.open()
 
-        self.read_thread = threading.Thread(target=self.read_loop)
+        self.stop_event = threading.Event()
+
+        self.read_thread = threading.Thread(target=self.read_loop, args=(self.stop_event,))
         self.read_thread.daemon = True
         self.read_thread.start()
 
     def close(self):
         if self.ser is not None:
+            self.stop_event.set()
             self.ser.close()
 
     def set_box_color(self, row, col, color: Color):
@@ -47,6 +54,7 @@ class SerialInterface:
         green = (color >> 8) & 0xFF
         blue = color & 0xFF
         cmd = struct.pack('!BBBBBBBBB', 0xAA, 0x01, row, col, red, green, blue, 0x55, 0x0A)
+        print(f"CMD: {cmd}")
         self.ser.write(cmd)
         self.relay_on = True
 
@@ -70,5 +78,5 @@ class SerialInterface:
         cmd = struct.pack('!BBBB', 0xAA, 0x03, 0x55, 0x0A)
         self.ser.write(cmd)
 
-def print_received_data(self, data):
+def print_received_data(data):
     print(data)

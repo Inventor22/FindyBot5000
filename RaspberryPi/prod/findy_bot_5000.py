@@ -48,6 +48,9 @@ class FindyBot5000:
             self.serial = SerialInterface(port, 115200, print_received_data)
             self.serial.open()
 
+        self.serial.clear_display()
+        self.serial.set_relay(False)
+
 
     def run(self) -> None:
 
@@ -67,12 +70,15 @@ class FindyBot5000:
                     if any(keyword in words for keyword in self.keywords):# 'jarvis' in words or 'jervis' in words:
                         print(f'Heard a keyword! {self.keywords}')
                         break
-                    elif 'print' in words:
+                    elif 'print' in words or 'table' in words:
                         self.db.print_tables()
                     elif 'exit' in words or 'quit' in words or 'stop' in words:
                         quit = True
                         self.serial.close()
                         raise Exception("Quitting")
+                    elif 'clear' in words:
+                        self.serial.clear_display()
+                        self.serial.set_relay(False)
 
                 # Step 2: Listen for a sentence
                 with self.speech as source:
@@ -126,11 +132,12 @@ class FindyBot5000:
                     found_items = self.db.search_items(item)
                     for found_item in found_items:
                         items_to_display.append(found_item)
-                                    
+
             elif cmd == 'add':
                 for item in items:
-                    added_or_updated_item = self.db.add_or_update_item(item, 1)
-                    items_to_display.append(added_or_updated_item)
+                    added_or_updated_item = self.db.add_or_update_item(item)
+                    for added_item in added_or_updated_item:
+                        items_to_display.append(added_item)
 
             elif cmd == 'remove':
                 items_deleted = self.db.delete_items2(items)
@@ -145,7 +152,11 @@ class FindyBot5000:
             print("The string provided is not a valid JSON.")
 
     def display_items(self, cmd: str, items: list) -> None:
-        print("Processed Items:")
+        
+        if not self.serial.relay_on:
+            print("Turning relay on")
+            self.serial.set_relay(True)
+    
         for item in items:
             print(item)
             
@@ -155,9 +166,6 @@ class FindyBot5000:
                 color = Color.Cyan
             elif cmd == 'remove':
                 color = Color.Red
-            
-            if not self.serial.relay_on:
-                self.serial.set_relay(True)
 
             self.serial.set_box_color(item[Item.Row], item[Item.Col], color)
 

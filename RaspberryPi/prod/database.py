@@ -4,6 +4,7 @@ from datetime import date
 class database:
     def __init__(self) -> None:
         self.create_tables_if_not_exists()
+        self.print_fts_table = False
 
     def search_items(self, query) -> list:
         conn = sqlite3.connect("inventory.db")
@@ -20,22 +21,18 @@ class database:
 
         return results
 
-    def add_or_update_item(self, item_name, additional_quantity) -> tuple[bool, int, int]:
+    def add_or_update_item(self, item_name: str, additional_quantity: int=1):
         conn = sqlite3.connect("inventory.db")
         cursor = conn.cursor()
 
         try:
             # Check if the item already exists
-            cursor.execute("SELECT * FROM item WHERE name = ?", (item_name,))
-            item = cursor.fetchone()
+            existing_items = self.search_items(item_name)
 
-            if item:
-                # Item exists, update its quantity
-                new_quantity = item[2] + additional_quantity
-                cursor.execute("UPDATE item SET quantity = ?, date_updated = ? WHERE name = ?",
-                            (new_quantity, date.today(), item_name))
-                
-                return True, item[3], item[4]
+            if existing_items:
+                # Items exists, return found items
+                return existing_items
+
             else:
                 # Item does not exist, find the next available row and column
                 # Query all rows and columns in the item table
@@ -75,10 +72,13 @@ class database:
                     VALUES (?, ?)
                     """, (cursor.lastrowid, item_name))
                 
-                return False, max_row, max_col
+                # Commit the changes before querying the db for the newly inserted item
+                conn.commit()
+                added_item = self.search_items(item_name)
+
+                return added_item #[item_name, additional_quantity, next_row, next_column, date.today(), date.today()]
         finally:
-            # Commit the changes and close the connection
-            conn.commit()
+            # Close the connection
             conn.close()
 
     def delete_items(self, items) -> None:
@@ -117,7 +117,7 @@ class database:
     
     def delete_items2(self, items) -> None:
         # Connect to the database
-        conn = sqlite3.connect("my_database.db")
+        conn = sqlite3.connect("inventory.db")
         cursor = conn.cursor()
 
         agg_deleted_items = []
@@ -168,18 +168,19 @@ class database:
         for item in items:
             print(f"{item[0]:<4} | {item[1]:<15} | {item[2]:<8} | {item[3]:<4} | {item[4]:<6} | {item[5]:<12} | {item[6]:<16}")
 
-        print()
-        print("Item FTS table:")
-        cursor.execute("SELECT * FROM item_fts")
-        rows = cursor.fetchall()
+        if self.print_fts_table:
+            print()
+            print("Item FTS table:")
+            cursor.execute("SELECT * FROM item_fts")
+            rows = cursor.fetchall()
 
-        if not rows:
-            print("The item_fts table is empty.")
-        else:
-            print(f"{'ID':<4} {'Name':<30}")
-            print("-" * 40)
-            for row in rows:
-                print(f"{row[0]:<4} {row[1]:<30}")
+            if not rows:
+                print("The item_fts table is empty.")
+            else:
+                print(f"{'ID':<4} {'Name':<30}")
+                print("-" * 40)
+                for row in rows:
+                    print(f"{row[0]:<4} {row[1]:<30}")
 
         conn.close()
 
