@@ -5,13 +5,16 @@ import speech_recognition as sr
 from pocketsphinx import LiveSpeech
 from elevenlabslib import *
 import platform
+from tenacity import retry, wait_random_exponential, stop_after_attempt
+import requests
+from termcolor import colored
 
 from database import database
 from serial_interface import SerialInterface, print_received_data
 from item import Item
 from color import Color
 
-class FindyBot5000_v0:
+class FindyBot5000:
     def __init__(self, port: str) -> None:
         # Keyword identification and sentence detection
         # Sphinx has some trouble getting 'jarvis' every time...
@@ -20,7 +23,7 @@ class FindyBot5000_v0:
         # Large Language Model and speech to text - OpenAI 
         self.openai_key = os.environ.get('OPENAI_API_KEY')
         openai.api_key = self.openai_key
-        self.engine = "text-davinci-003"
+        self.engine = "gpt-3.5-turbo-0613"
 
         # Voice synthesis - ElevenLabs
         self.elevenlabs_key = os.environ.get('ELEVENLABS_API_KEY')
@@ -51,6 +54,14 @@ class FindyBot5000_v0:
         self.serial.clear_display()
         self.serial.set_relay(False)
 
+        self.messages = []
+        self.messages.append({
+            "role": "system", 
+            "content":
+                "Don't make assumptions about what values to plug into functions. " + 
+                "Ask for clarification if a user request is ambiguous or if a quantity is not specified as a number."})
+
+        self.get_functions()
 
     def run(self) -> None:
 
@@ -93,6 +104,10 @@ class FindyBot5000_v0:
 
                 if whisper_text == '':
                     continue
+                
+                self.run_completion(whisper_text)
+
+
                 
                 # Step 4: Identify items from text using one of OpenAI's GPT LLM's
                 human_response, json_response = self.get_responses(whisper_text)
@@ -168,6 +183,149 @@ class FindyBot5000_v0:
                 color = Color.Red
 
             self.serial.set_box_color(item[Item.Row], item[Item.Col], color)
+
+    @retry(wait=wait_random_exponential(multiplier=1, max=40), stop=stop_after_attempt(3))
+    def chat_completion_request(self, messages, functions=None, function_call=None, model=GPT_MODEL):
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + openai.api_key,
+        }
+        json_data = {"model": model, "messages": messages}
+        if functions is not None:
+            json_data.update({"functions": functions})
+        if function_call is not None:
+            json_data.update({"function_call": function_call})
+        try:
+            response = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers=headers,
+                json=json_data,
+            )
+            return response
+        except Exception as e:
+            print("Unable to generate ChatCompletion response")
+            print(f"Exception: {e}")
+            return e
+        
+    def pretty_print_conversation(self, messages):
+        role_to_color = {
+            "system": "red",
+            "user": "green",
+            "assistant": "blue",
+            "function": "magenta",
+        }
+        
+        for message in messages:
+            if message["role"] == "system":
+                print(colored(f"system: {message['content']}\n", role_to_color[message["role"]]))
+            elif message["role"] == "user":
+                print(colored(f"user: {message['content']}\n", role_to_color[message["role"]]))
+            elif message["role"] == "assistant" and message.get("function_call"):
+                print(colored(f"assistant: {message['function_call']}\n", role_to_color[message["role"]]))
+            elif message["role"] == "assistant" and not message.get("function_call"):
+                print(colored(f"assistant: {message['content']}\n", role_to_color[message["role"]]))
+            elif message["role"] == "function":
+                print(colored(f"function ({message['name']}): {message['content']}\n", role_to_color[message["role"]]))
+
+    def get_functions(self):
+        self.functions = [
+        {
+            "name": "search_items",
+            "description": "Search for items in the inventory database",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query to match item names",
+                    }
+                },
+                "required": ["query"]
+            }
+        },
+        {
+            "name": "add_or_update_item",
+            "description": "Add a new item to the inventory or update it if it already exists",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "item_name": {
+                        "type": "string",
+                        "description": "The name of the item to add or update",
+                    },
+                    "additional_quantity": {
+                        "type": "integer",
+                        "description": "The additional quantity to add to the inventory (defaults to 1)",
+                        "default": 1
+                    }
+                },
+                "required": ["item_name"]
+            }
+        },
+        {
+            "name": "delete_items",
+            "description": "Delete items from the inventory database",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "A list of item names to delete from the inventory",
+                    }
+                },
+                "required": ["items"]
+            }
+        },
+        {
+            "name": "print_tables",
+            "description": "Print the current state of the tables in the database",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "exit",
+            "description": "Exit the program and close any open resources",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "clear_display",
+            "description": "Clear the current display, turn off all the lights",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    ]
+    
+    def run_completion(self, text):
+        self.messages.append({"role": "user", "content": text})
+        chat_response = self.chat_completion_request(
+            self.messages, functions=self.functions
+        )
+        assistant_message = chat_response.json()["choices"][0]["message"]
+        self.messages.append(assistant_message)
+        print(assistant_message)
+
+        return assistant_message
+    
+    def execute_function_call(self, message):
+        if message["function_call"]["name"] == "search_items":
+            query = json.loads(message["function_call"]["arguments"])["query"]
+            results = self.db.search_items(query)
+        else:
+            results = f"Error: function {message['function_call']['name']} does not exist"
+        return results
 
     def get_responses(self, question: str) -> str:      
 
